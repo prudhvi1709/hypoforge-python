@@ -8,7 +8,8 @@ const $hypothesisPrompt = document.getElementById("hypothesis-prompt");
 const $synthesis = document.getElementById("synthesis");
 const $synthesisResult = document.getElementById("synthesis-result");
 const $status = document.getElementById("status");
-const $fileUpload = document.getElementById("file-upload");
+const $filePath = document.getElementById("file-path");
+const $loadFile = document.getElementById("load-file");
 const loading = `<div class="text-center my-5"><div class="spinner-border" role="status"></div></div>`;
 
 let data;
@@ -140,40 +141,62 @@ const testButton = (index) =>
   `<button type="button" class="btn btn-sm btn-primary test-hypothesis" data-index="${index}">Test</button>`;
 
 async function loadData(source) {
-  if (source instanceof File) {
-    const formData = new FormData();
-    formData.append('file', source);
-    
-    const response = await fetch('/upload', {
+  if (typeof source === 'string') {
+    // Handle file path
+    const response = await apiCall('/load-file', {
       method: 'POST',
-      body: formData
+      body: JSON.stringify({ file_path: source })
     });
-    
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Upload failed');
-    }
-    
-    return response.json();
+    return response;
   } else if (typeof source === 'object' && source.href) {
-    // Handle demo data - fetch from URL and upload
+    // Handle demo data - fetch from URL and save to temp file, then load
     const response = await fetch(source.href);
     const blob = await response.blob();
-    const file = new File([blob], source.href.split('/').pop(), { type: blob.type });
-    return loadData(file);
+    
+    // For demo data, we'll need to handle this differently since we can't save arbitrary files
+    // Instead, we'll fetch the data and process it directly
+    const fileName = source.href.split('/').pop().toLowerCase();
+    
+    if (fileName.endsWith('.csv')) {
+      const text = await response.text();
+      const lines = text.split('\n');
+      const headers = lines[0].split(',');
+      const records = lines.slice(1).filter(line => line.trim()).map(line => {
+        const values = line.split(',');
+        const record = {};
+        headers.forEach((header, i) => {
+          const value = values[i]?.trim().replace(/"/g, '');
+          // Try to parse as number, otherwise keep as string
+          record[header.trim().replace(/"/g, '')] = isNaN(Number(value)) ? value : Number(value);
+        });
+        return record;
+      });
+      
+      // Generate description
+      const description = `The Pandas DataFrame df has ${records.length} rows and ${headers.length} columns:\n` +
+        headers.map(col => `- ${col}: data column`).join('\n');
+      
+      return { data: records, description };
+    } else {
+      throw new Error('Demo database files not supported with file path method. Please use CSV demos or provide local file paths.');
+    }
   }
 }
 
-// Handle file upload
-$fileUpload.addEventListener("change", async () => {
-  if (!$fileUpload.files.length) return;
+// Handle file path load
+$loadFile.addEventListener("click", async () => {
+  const filePath = $filePath.value.trim();
+  if (!filePath) {
+    $status.innerHTML = `<div class="alert alert-warning">Please enter a file path</div>`;
+    setTimeout(() => $status.innerHTML = "", 3000);
+    return;
+  }
   if (!validateSettings()) return;
 
-  const file = $fileUpload.files[0];
   $status.innerHTML = loading;
   
   try {
-    const result = await loadData(file);
+    const result = await loadData(filePath);
     data = result.data;
     description = result.description;
     
@@ -181,6 +204,7 @@ $fileUpload.addEventListener("change", async () => {
     const settings = getSettings();
     
     $hypotheses.innerHTML = loading;
+    
     const response = await apiCall('/generate-hypotheses', {
       method: 'POST',
       body: JSON.stringify({
@@ -199,6 +223,12 @@ $fileUpload.addEventListener("change", async () => {
   } catch (error) {
     $status.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
     setTimeout(() => $status.innerHTML = "", 5000);
+  }
+});
+// Allow Enter key to trigger load
+$filePath.addEventListener("keypress", (e) => {
+  if (e.key === "Enter") {
+    $loadFile.click();
   }
 });
 

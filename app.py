@@ -10,7 +10,7 @@
 # ]
 # ///
 
-from fastapi import FastAPI, UploadFile, HTTPException, File
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -63,6 +63,9 @@ class SynthesisRequest(BaseModel):
     api_key: str
     model_name: str
 
+class LoadFileRequest(BaseModel):
+    file_path: str
+
 @app.get("/")
 async def root():
     """Serve the main HTML page"""
@@ -74,41 +77,62 @@ async def get_config():
     with open("config.json", "r") as f:
         return json.load(f)
 
-@app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
-    """Handle file upload and return data description"""
+@app.post("/load-file")
+async def load_file(request: LoadFileRequest):
+    """Load file from filesystem path and return data description"""
     try:
-        if file.filename.lower().endswith('.csv'):
-            content = await file.read()
-            df = pd.read_csv(StringIO(content.decode('utf-8')))
-        elif file.filename.lower().endswith(('.sqlite', '.sqlite3', '.db', '.s3db', '.sl3')):
-            content = await file.read()
-            temp_db = f"temp_{file.filename}"
-            with open(temp_db, 'wb') as f:
-                f.write(content)
-            
-            conn = sqlite3.connect(temp_db)
+        file_path = request.file_path.strip()
+        
+        # Security: Basic path validation
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+        
+        if not os.path.isfile(file_path):
+            raise HTTPException(status_code=400, detail=f"Path is not a file: {file_path}")
+        
+        # Load based on file extension
+        if file_path.lower().endswith('.csv'):
+            df = pd.read_csv(file_path)
+        elif file_path.lower().endswith(('.sqlite', '.sqlite3', '.db', '.s3db', '.sl3')):
+            conn = sqlite3.connect(file_path)
             tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table'", conn)
             if tables.empty:
                 conn.close()
-                os.remove(temp_db)
                 raise HTTPException(status_code=400, detail="No tables found in database")
             
             table_name = tables.iloc[0]['name']
             df = pd.read_sql_query(f"SELECT * FROM `{table_name}`", conn)
             conn.close()
-            os.remove(temp_db)
         else:
-            raise HTTPException(status_code=400, detail="Unsupported file format")
+            raise HTTPException(status_code=400, detail="Unsupported file format. Supported: .csv, .sqlite, .sqlite3, .db, .s3db, .sl3")
         
         # Convert DataFrame to JSON-serializable format
-        data = df.to_dict('records')
+        # Handle NaN and infinite values for JSON compatibility
+        df_clean = df.copy()
+        
+        # Replace infinite values with None
+        df_clean = df_clean.replace([np.inf, -np.inf], None)
+        
+        # Fill NaN values with appropriate defaults based on column type
+        for col in df_clean.columns:
+            if df_clean[col].dtype in ['float64', 'float32', 'int64', 'int32']:
+                df_clean[col] = df_clean[col].fillna(0)
+            else:
+                df_clean[col] = df_clean[col].fillna("")
+        
+        data = df_clean.to_dict('records')
         description = _generate_description(df)
         
         return {"data": data, "description": description}
     
+    except pd.errors.EmptyDataError:
+        raise HTTPException(status_code=400, detail="The file is empty or contains no valid data")
+    except pd.errors.ParserError as e:
+        raise HTTPException(status_code=400, detail=f"Error parsing file: {str(e)}")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission denied accessing file: {file_path}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Error loading file: {str(e)}")
 
 @app.post("/generate-hypotheses")
 async def generate_hypotheses(request: HypothesisRequest):

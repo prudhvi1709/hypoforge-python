@@ -72,9 +72,14 @@
       <div class="row mb-3">
         <div class="col-12 col-md-4 mx-auto">
           <div class="card p-3 mb-3">
-            <label for="file-upload" class="form-label fw-bold">Upload Your Data</label>
-            <input type="file" class="form-control" id="file-upload" accept=".csv,.sqlite,.sqlite3,.db,.s3db,.sl3">
-            <small class="form-text text-muted">Select a CSV or SQLite file to analyze</small>
+            <label for="file-path" class="form-label fw-bold">Data File Path</label>
+            <div class="input-group">
+              <input type="text" class="form-control" id="file-path" 
+                     placeholder="/path/to/your/data.csv"
+                     title="Enter the full path to your CSV or SQLite file">
+              <button class="btn btn-primary" type="button" id="load-file">Load</button>
+            </div>
+            <small class="form-text text-muted">Enter the full path to a CSV or SQLite file (.csv, .sqlite, .sqlite3, .db, .s3db, .sl3)</small>
           </div>
         </div>
       </div>
