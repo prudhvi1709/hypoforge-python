@@ -149,37 +149,12 @@ async function loadData(source) {
     });
     return response;
   } else if (typeof source === 'object' && source.href) {
-    // Handle demo data - fetch from URL and save to temp file, then load
-    const response = await fetch(source.href);
-    const blob = await response.blob();
-    
-    // For demo data, we'll need to handle this differently since we can't save arbitrary files
-    // Instead, we'll fetch the data and process it directly
-    const fileName = source.href.split('/').pop().toLowerCase();
-    
-    if (fileName.endsWith('.csv')) {
-      const text = await response.text();
-      const lines = text.split('\n');
-      const headers = lines[0].split(',');
-      const records = lines.slice(1).filter(line => line.trim()).map(line => {
-        const values = line.split(',');
-        const record = {};
-        headers.forEach((header, i) => {
-          const value = values[i]?.trim().replace(/"/g, '');
-          // Try to parse as number, otherwise keep as string
-          record[header.trim().replace(/"/g, '')] = isNaN(Number(value)) ? value : Number(value);
-        });
-        return record;
-      });
-      
-      // Generate description
-      const description = `The Pandas DataFrame df has ${records.length} rows and ${headers.length} columns:\n` +
-        headers.map(col => `- ${col}: data column`).join('\n');
-      
-      return { data: records, description };
-    } else {
-      throw new Error('Demo database files not supported with file path method. Please use CSV demos or provide local file paths.');
-    }
+    // Handle demo data - use the new /load-demo endpoint
+    const response = await apiCall('/load-demo', {
+      method: 'POST',
+      body: JSON.stringify({ demo_url: source.href })
+    });
+    return response;
   }
 }
 

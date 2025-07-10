@@ -66,6 +66,9 @@ class SynthesisRequest(BaseModel):
 class LoadFileRequest(BaseModel):
     file_path: str
 
+class LoadDemoRequest(BaseModel):
+    demo_url: str
+
 @app.get("/")
 async def root():
     """Serve the main HTML page"""
@@ -90,38 +93,8 @@ async def load_file(request: LoadFileRequest):
         if not os.path.isfile(file_path):
             raise HTTPException(status_code=400, detail=f"Path is not a file: {file_path}")
         
-        # Load based on file extension
-        if file_path.lower().endswith('.csv'):
-            df = pd.read_csv(file_path)
-        elif file_path.lower().endswith(('.sqlite', '.sqlite3', '.db', '.s3db', '.sl3')):
-            conn = sqlite3.connect(file_path)
-            tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table'", conn)
-            if tables.empty:
-                conn.close()
-                raise HTTPException(status_code=400, detail="No tables found in database")
-            
-            table_name = tables.iloc[0]['name']
-            df = pd.read_sql_query(f"SELECT * FROM `{table_name}`", conn)
-            conn.close()
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported file format. Supported: .csv, .sqlite, .sqlite3, .db, .s3db, .sl3")
-        
-        # Convert DataFrame to JSON-serializable format
-        # Handle NaN and infinite values for JSON compatibility
-        df_clean = df.copy()
-        
-        # Replace infinite values with None
-        df_clean = df_clean.replace([np.inf, -np.inf], None)
-        
-        # Fill NaN values with appropriate defaults based on column type
-        for col in df_clean.columns:
-            if df_clean[col].dtype in ['float64', 'float32', 'int64', 'int32']:
-                df_clean[col] = df_clean[col].fillna(0)
-            else:
-                df_clean[col] = df_clean[col].fillna("")
-        
-        data = df_clean.to_dict('records')
-        description = _generate_description(df)
+        df = await _load_file_data(file_path)
+        data, description = _process_dataframe(df)
         
         return {"data": data, "description": description}
     
@@ -133,6 +106,80 @@ async def load_file(request: LoadFileRequest):
         raise HTTPException(status_code=403, detail=f"Permission denied accessing file: {file_path}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading file: {str(e)}")
+
+@app.post("/load-demo")
+async def load_demo(request: LoadDemoRequest):
+    """Load demo file from URL and return data description"""
+    try:
+        demo_url = request.demo_url.strip()
+        
+        # Download file to temporary location
+        import tempfile
+        import os
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(demo_url) as response:
+                if response.status != 200:
+                    raise HTTPException(status_code=response.status, detail=f"Failed to download demo file: {demo_url}")
+                
+                # Create temporary file with correct extension
+                file_extension = demo_url.split('.')[-1].lower()
+                with tempfile.NamedTemporaryFile(suffix=f'.{file_extension}', delete=False) as tmp_file:
+                    tmp_file.write(await response.read())
+                    temp_path = tmp_file.name
+        
+        try:
+            df = await _load_file_data(temp_path)
+            data, description = _process_dataframe(df)
+            
+            return {"data": data, "description": description}
+        finally:
+            # Clean up temporary file
+            os.unlink(temp_path)
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading demo: {str(e)}")
+
+async def _load_file_data(file_path: str) -> pd.DataFrame:
+    """Load data from file path into DataFrame"""
+    # Load based on file extension
+    if file_path.lower().endswith('.csv'):
+        df = pd.read_csv(file_path)
+    elif file_path.lower().endswith(('.sqlite', '.sqlite3', '.db', '.s3db', '.sl3')):
+        conn = sqlite3.connect(file_path)
+        tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table'", conn)
+        if tables.empty:
+            conn.close()
+            raise HTTPException(status_code=400, detail="No tables found in database")
+        
+        table_name = tables.iloc[0]['name']
+        df = pd.read_sql_query(f"SELECT * FROM `{table_name}`", conn)
+        conn.close()
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file format. Supported: .csv, .sqlite, .sqlite3, .db, .s3db, .sl3")
+    
+    return df
+
+def _process_dataframe(df: pd.DataFrame) -> tuple:
+    """Process DataFrame for JSON serialization and generate description"""
+    # Convert DataFrame to JSON-serializable format
+    # Handle NaN and infinite values for JSON compatibility
+    df_clean = df.copy()
+    
+    # Replace infinite values with None
+    df_clean = df_clean.replace([np.inf, -np.inf], None)
+    
+    # Fill NaN values with appropriate defaults based on column type
+    for col in df_clean.columns:
+        if df_clean[col].dtype in ['float64', 'float32', 'int64', 'int32']:
+            df_clean[col] = df_clean[col].fillna(0)
+        else:
+            df_clean[col] = df_clean[col].fillna("")
+    
+    data = df_clean.to_dict('records')
+    description = _generate_description(df)
+    
+    return data, description
 
 @app.post("/generate-hypotheses")
 async def generate_hypotheses(request: HypothesisRequest):
