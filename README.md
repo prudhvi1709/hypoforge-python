@@ -7,14 +7,73 @@ An AI-powered tool that automatically generates and tests hypotheses on data, pr
 Hypothesis Forge analyzes your data and generates hypotheses that you can test. It then automatically tests them and provides detailed results with statistical significance, all powered by a FastAPI backend with streaming LLM responses.
 
 ```mermaid
-flowchart TD
-    A[Data Input] --> B[Hypothesis Generation]
-    B --> C[Statistical Testing]
-    C --> D[Results Synthesis]
-    E[Frontend Settings] --> F[API Configuration]
-    F --> B
-    F --> C
-    F --> D
+graph TB
+    subgraph "Frontend Layer"
+        A[🖥️ User Interface]
+        B[⚙️ Settings Modal]
+        C[📁 File Upload/Demo Selection]
+        D[📊 Results Display]
+        E[🔄 Real-time Updates]
+    end
+    
+    subgraph "API Layer"
+        F[🚀 FastAPI Backend]
+        G[📡 Streaming Endpoints]
+        H[🔒 Request Validation]
+    end
+    
+    subgraph "Data Processing"
+        I[📋 Data Loading]
+        J[🧹 Data Cleaning]
+        K[📈 DataFrame Processing]
+    end
+    
+    subgraph "AI Pipeline"
+        L[🤖 LLM API Client]
+        M[💭 Hypothesis Generation]
+        N[🔬 Statistical Testing]
+        O[📝 Code Generation]
+        P[📊 Results Analysis]
+        Q[💡 Synthesis & Insights]
+    end
+    
+    subgraph "External Services"
+        R[🧠 LLM Provider]
+        S[☁️ Demo Data URLs]
+    end
+    
+    %% User Flow
+    A --> B
+    B --> |Configure API| F
+    A --> C
+    C --> |Upload/Select| I
+    
+    %% Data Flow
+    I --> J
+    J --> K
+    K --> M
+    
+    %% API Flow
+    F --> G
+    G --> H
+    H --> L
+    
+    %% AI Processing
+    L --> R
+    R --> |Stream Response| M
+    M --> |Generate Code| O
+    O --> N
+    N --> |Execute Tests| P
+    P --> Q
+    
+    %% Results Flow
+    M --> |Stream| E
+    P --> |Stream| E
+    Q --> |Stream| E
+    E --> D
+    
+    %% External Data
+    S --> |Demo Files| I
 ```
 
 ## Features
