@@ -1,6 +1,7 @@
 import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
 import { Marked } from "https://cdn.jsdelivr.net/npm/marked@13/+esm";
 import hljs from "https://cdn.jsdelivr.net/npm/highlight.js@11/+esm";
+import { parse } from "https://cdn.jsdelivr.net/npm/partial-json@0.1.7/+esm";
 
 const $demos = document.getElementById("demos");
 const $hypotheses = document.getElementById("hypotheses");
@@ -117,6 +118,44 @@ async function apiCall(endpoint, options = {}) {
   return response.json();
 }
 
+// Streaming API call function - replicates original asyncLLM pattern
+async function streamFromBackend(endpoint, requestBody, onChunk) {
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(requestBody)
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Streaming API call failed');
+  }
+  
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    
+    const chunk = decoder.decode(value);
+    const lines = chunk.split('\n');
+    
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          onChunk(data);
+        } catch (e) {
+          // Skip invalid JSON lines
+        }
+      }
+    }
+  }
+}
+
 // Load configurations and render the demos
 $status.innerHTML = loading;
 const config = await apiCall('/config');
@@ -180,19 +219,23 @@ $loadFile.addEventListener("click", async () => {
     
     $hypotheses.innerHTML = loading;
     
-    const response = await apiCall('/generate-hypotheses', {
-      method: 'POST',
-      body: JSON.stringify({
-        system_prompt: systemPrompt,
-        description: description,
-        api_base_url: settings.apiBaseUrl,
-        api_key: settings.apiKey,
-        model_name: settings.modelName
-      })
+    // Use streaming for hypothesis generation
+    await streamFromBackend('/generate-hypotheses-stream', {
+      system_prompt: systemPrompt,
+      description: description,
+      api_base_url: settings.apiBaseUrl,
+      api_key: settings.apiKey,
+      model_name: settings.modelName
+    }, (data) => {
+      if (data.content) {
+        try {
+          ({ hypotheses } = parse(data.content));
+          drawHypotheses();
+        } catch (e) {
+          // Continue parsing as content streams
+        }
+      }
     });
-    
-    hypotheses = response.hypotheses;
-    drawHypotheses();
     $synthesis.classList.remove("d-none");
     $status.innerHTML = "";
   } catch (error) {
@@ -226,19 +269,24 @@ $demos.addEventListener("click", async (e) => {
     const settings = getSettings();
     
     $hypotheses.innerHTML = loading;
-    const response = await apiCall('/generate-hypotheses', {
-      method: 'POST',
-      body: JSON.stringify({
-        system_prompt: systemPrompt,
-        description: description,
-        api_base_url: settings.apiBaseUrl,
-        api_key: settings.apiKey,
-        model_name: settings.modelName
-      })
-    });
     
-    hypotheses = response.hypotheses;
-    drawHypotheses();
+    // Use streaming for hypothesis generation
+    await streamFromBackend('/generate-hypotheses-stream', {
+      system_prompt: systemPrompt,
+      description: description,
+      api_base_url: settings.apiBaseUrl,
+      api_key: settings.apiKey,
+      model_name: settings.modelName
+    }, (data) => {
+      if (data.content) {
+        try {
+          ({ hypotheses } = parse(data.content));
+          drawHypotheses();
+        } catch (e) {
+          // Continue parsing as content streams
+        }
+      }
+    });
     $synthesis.classList.remove("d-none");
     $status.innerHTML = "";
   } catch (error) {
@@ -286,25 +334,32 @@ $hypotheses.addEventListener("click", async (e) => {
   $outcome.innerHTML = loading;
   
   try {
-    const response = await apiCall('/test-hypothesis', {
-      method: 'POST',
-      body: JSON.stringify({
-        hypothesis: hypothesis.hypothesis,
-        description: description,
-        analysis_prompt: analysisPrompt,
-        data: data,
-        api_base_url: settings.apiBaseUrl,
-        api_key: settings.apiKey,
-        model_name: settings.modelName
-      })
-    });
+    let fullAnalysis = "";
+    let testResult = null;
     
-    $outcome.classList.add(response.p_value < 0.05 ? "success" : "failure");
-    $outcome.innerHTML = marked.parse(response.summary);
-    $result.innerHTML = `<details>
-      <summary class="h5 my-3">Analysis</summary>
-      ${marked.parse(response.analysis)}
-    </details>`;
+    // Use streaming for hypothesis testing
+    await streamFromBackend('/test-hypothesis-stream', {
+      hypothesis: hypothesis.hypothesis,
+      description: description,
+      analysis_prompt: analysisPrompt,
+      data: data,
+      api_base_url: settings.apiBaseUrl,
+      api_key: settings.apiKey,
+      model_name: settings.modelName
+    }, (data) => {
+      if (data.type === 'analysis') {
+        fullAnalysis = data.content;
+        $result.innerHTML = marked.parse(data.content);
+      } else if (data.type === 'summary') {
+        testResult = data;
+        $outcome.classList.add(data.p_value < 0.05 ? "success" : "failure");
+        $outcome.innerHTML = marked.parse(data.content);
+        $result.innerHTML = `<details>
+          <summary class="h5 my-3">Analysis</summary>
+          ${marked.parse(fullAnalysis)}
+        </details>`;
+      }
+    });
   } catch (error) {
     $outcome.innerHTML = `<pre class="alert alert-danger">${error.message}</pre>`;
   }
@@ -331,17 +386,18 @@ document.querySelector("#synthesize").addEventListener("click", async (e) => {
   
   try {
     const settings = getSettings();
-    const response = await apiCall('/synthesize', {
-      method: 'POST',
-      body: JSON.stringify({ 
-        hypotheses,
-        api_base_url: settings.apiBaseUrl,
-        api_key: settings.apiKey,
-        model_name: settings.modelName
-      })
-    });
     
-    $synthesisResult.innerHTML = marked.parse(response.synthesis);
+    // Use streaming for synthesis
+    await streamFromBackend('/synthesize-stream', {
+      hypotheses,
+      api_base_url: settings.apiBaseUrl,
+      api_key: settings.apiKey,
+      model_name: settings.modelName
+    }, (data) => {
+      if (data.content) {
+        $synthesisResult.innerHTML = marked.parse(data.content);
+      }
+    });
   } catch (error) {
     $synthesisResult.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
   }

@@ -12,7 +12,7 @@
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Tuple
 import pandas as pd
@@ -194,6 +194,25 @@ async def generate_hypotheses(request: HypothesisRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/generate-hypotheses-stream")
+async def generate_hypotheses_stream(request: HypothesisRequest):
+    """Generate hypotheses using LLM with streaming"""
+    try:
+        async def generate():
+            async for content in _call_llm_stream(
+                request.system_prompt, 
+                request.description, 
+                request.api_base_url,
+                request.api_key,
+                request.model_name,
+                use_schema=True
+            ):
+                yield f"data: {json.dumps({'content': content})}\n\n"
+        
+        return StreamingResponse(generate(), media_type="text/event-stream")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/test-hypothesis")
 async def test_hypothesis(request: TestRequest):
     """Test a hypothesis using Python code execution"""
@@ -235,6 +254,42 @@ async def test_hypothesis(request: TestRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/test-hypothesis-stream")
+async def test_hypothesis_stream(request: TestRequest):
+    """Test a hypothesis using Python code execution with streaming"""
+    try:
+        async def generate():
+            # Stream analysis generation
+            full_analysis = ""
+            async for content in _call_llm_stream(
+                request.analysis_prompt,
+                f"Hypothesis: {request.hypothesis}\n\n{request.description}",
+                request.api_base_url,
+                request.api_key,
+                request.model_name
+            ):
+                full_analysis = content
+                yield f"data: {json.dumps({'type': 'analysis', 'content': content})}\n\n"
+            
+            # Extract and execute code
+            code = _extract_python_code(full_analysis)
+            df = pd.DataFrame(request.data)
+            success, p_value = _execute_test_code(code, df)
+            
+            # Stream summary generation
+            async for content in _call_llm_stream(
+                "You are an expert data analyst.\nGiven a hypothesis and its outcome, provide a plain English summary of the findings as a crisp H5 heading (#####), followed by 1-2 concise supporting sentences.\nHighlight in **bold** the keywords in the supporting statements.\nDo not mention the p-value but _interpret_ it to support the conclusion quantitatively.",
+                f"Hypothesis: {request.hypothesis}\n\n{request.description}\n\nResult: {success}. p-value: {p_value:.6f}",
+                request.api_base_url,
+                request.api_key,
+                request.model_name
+            ):
+                yield f"data: {json.dumps({'type': 'summary', 'content': content, 'success': success, 'p_value': p_value})}\n\n"
+        
+        return StreamingResponse(generate(), media_type="text/event-stream")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/synthesize")
 async def synthesize_results(request: SynthesisRequest):
     """Synthesize hypothesis test results"""
@@ -265,6 +320,38 @@ Finally, after a break (---) add a 1-paragraph executive summary section (H5) su
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/synthesize-stream")
+async def synthesize_results_stream(request: SynthesisRequest):
+    """Synthesize hypothesis test results with streaming"""
+    try:
+        user_content = "\n\n".join([
+            f"Hypothesis: {h['title']}\nBenefit: {h['benefit']}\nResult: {h['outcome']}"
+            for h in request.hypotheses if h.get('outcome')
+        ])
+        
+        system_prompt = """Given the below hypotheses and results, summarize the key takeaways and actions in Markdown.
+Begin with the hypotheses with lowest p-values AND highest business impact. Ignore results with errors.
+Use action titles has H5 (#####). Just reading titles should tell the audience EXACTLY what to do.
+Below each, add supporting bullet points that
+  - PROVE the action title, mentioning which hypotheses led to this conclusion.
+  - Do not mention the p-value but _interpret_ it to support the action
+  - Highlight key phrases in **bold**.
+Finally, after a break (---) add a 1-paragraph executive summary section (H5) summarizing these actions."""
+        
+        async def generate():
+            async for content in _call_llm_stream(
+                system_prompt, 
+                user_content,
+                request.api_base_url,
+                request.api_key,
+                request.model_name
+            ):
+                yield f"data: {json.dumps({'content': content})}\n\n"
+        
+        return StreamingResponse(generate(), media_type="text/event-stream")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 def _generate_description(df: pd.DataFrame) -> str:
     """Generate data description from DataFrame"""
     column_descriptions = []
@@ -288,6 +375,80 @@ def _generate_description(df: pd.DataFrame) -> str:
         column_descriptions.append(f"- {col}: {desc}")
     
     return f"The Pandas DataFrame df has {len(df)} rows and {len(df.columns)} columns:\n" + "\n".join(column_descriptions)
+
+async def _call_llm_stream(system_prompt: str, user_content: str, api_base_url: str, api_key: str, model_name: str, use_schema: bool = False):
+    """Call LLM API with streaming support"""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API key is required")
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content}
+    ]
+    
+    body = {
+        "model": model_name,
+        "messages": messages,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        "temperature": 0
+    }
+    
+    if use_schema:
+        body["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "HypothesesResponse",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "hypotheses": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "hypothesis": {"type": "string"},
+                                    "benefit": {"type": "string"}
+                                },
+                                "required": ["hypothesis", "benefit"]
+                            }
+                        }
+                    },
+                    "required": ["hypotheses"]
+                }
+            }
+        }
+    
+    api_url = f"{api_base_url}/chat/completions"
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            api_url,
+            json=body,
+            headers={"Authorization": f"Bearer {api_key}:hypoforge", "Content-Type": "application/json"}
+        ) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                raise HTTPException(status_code=response.status, detail=f"LLM API error: {error_text}")
+            
+            full_content = ""
+            async for line in response.content:
+                if line:
+                    line_str = line.decode('utf-8').strip()
+                    if line_str.startswith("data: "):
+                        data_str = line_str[6:]
+                        if data_str and data_str != "[DONE]":
+                            try:
+                                chunk = json.loads(data_str)
+                                choices = chunk.get("choices", [])
+                                if choices and len(choices) > 0:
+                                    delta = choices[0].get("delta", {})
+                                    if delta.get("content"):
+                                        content = delta["content"]
+                                        full_content += content
+                                        yield full_content
+                            except json.JSONDecodeError:
+                                continue
 
 async def _call_llm(system_prompt: str, user_content: str, api_base_url: str, api_key: str, model_name: str, use_schema: bool = False) -> str:
     """Call LLM API"""
