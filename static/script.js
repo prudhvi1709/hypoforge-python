@@ -1,4 +1,3 @@
-import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
 import { Marked } from "https://cdn.jsdelivr.net/npm/marked@13/+esm";
 import hljs from "https://cdn.jsdelivr.net/npm/highlight.js@11/+esm";
 import { parse } from "https://cdn.jsdelivr.net/npm/partial-json@0.1.7/+esm";
@@ -32,12 +31,6 @@ marked.use({
   },
 });
 
-const numFormat = new Intl.NumberFormat("en-US", {
-  style: "decimal",
-  notation: "compact",
-  compactDisplay: "short",
-});
-const num = (val) => numFormat.format(val);
 
 // Settings management
 function getSettings() {
@@ -62,6 +55,11 @@ function validateSettings() {
       <i class="bi bi-exclamation-triangle"></i>
       Please configure your API settings by clicking the Settings button in the navigation.
     </div>`;
+    
+    // Auto-show settings modal when credentials are missing
+    const modal = new bootstrap.Modal(document.getElementById('settingsModal'));
+    modal.show();
+    
     return false;
   }
   return true;
@@ -96,10 +94,26 @@ document.getElementById("saveSettings").addEventListener("click", () => {
   
   // Clear any existing warning
   $status.innerHTML = "";
+  
+  // Show success message briefly
+  $status.innerHTML = `<div class="alert alert-success">
+    <i class="bi bi-check-circle"></i>
+    Settings saved successfully!
+  </div>`;
+  setTimeout(() => $status.innerHTML = "", 3000);
 });
 
 // Initialize settings on page load
-document.addEventListener("DOMContentLoaded", initSettings);
+document.addEventListener("DOMContentLoaded", () => {
+  initSettings();
+  
+  // Auto-show settings modal if no API key is stored
+  const settings = getSettings();
+  if (!settings.apiKey) {
+    const modal = new bootstrap.Modal(document.getElementById('settingsModal'));
+    modal.show();
+  }
+});
 
 async function apiCall(endpoint, options = {}) {
   const response = await fetch(endpoint, {
@@ -220,7 +234,7 @@ $loadFile.addEventListener("click", async () => {
     $hypotheses.innerHTML = loading;
     
     // Use streaming for hypothesis generation
-    await streamFromBackend('/generate-hypotheses-stream', {
+    await streamFromBackend('/generate-hypotheses', {
       system_prompt: systemPrompt,
       description: description,
       api_base_url: settings.apiBaseUrl,
@@ -271,7 +285,7 @@ $demos.addEventListener("click", async (e) => {
     $hypotheses.innerHTML = loading;
     
     // Use streaming for hypothesis generation
-    await streamFromBackend('/generate-hypotheses-stream', {
+    await streamFromBackend('/generate-hypotheses', {
       system_prompt: systemPrompt,
       description: description,
       api_base_url: settings.apiBaseUrl,
@@ -338,7 +352,7 @@ $hypotheses.addEventListener("click", async (e) => {
     let testResult = null;
     
     // Use streaming for hypothesis testing
-    await streamFromBackend('/test-hypothesis-stream', {
+    await streamFromBackend('/test-hypothesis', {
       hypothesis: hypothesis.hypothesis,
       description: description,
       analysis_prompt: analysisPrompt,
@@ -388,7 +402,7 @@ document.querySelector("#synthesize").addEventListener("click", async (e) => {
     const settings = getSettings();
     
     // Use streaming for synthesis
-    await streamFromBackend('/synthesize-stream', {
+    await streamFromBackend('/synthesize', {
       hypotheses,
       api_base_url: settings.apiBaseUrl,
       api_key: settings.apiKey,

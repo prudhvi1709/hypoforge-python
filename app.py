@@ -112,7 +112,6 @@ async def load_demo(request: LoadDemoRequest):
         
         # Download file to temporary location
         import tempfile
-        import os
         
         async with aiohttp.ClientSession() as session:
             async with session.get(demo_url) as response:
@@ -180,22 +179,6 @@ def _process_dataframe(df: pd.DataFrame) -> tuple:
 
 @app.post("/generate-hypotheses")
 async def generate_hypotheses(request: HypothesisRequest):
-    """Generate hypotheses using LLM"""
-    try:
-        response = await _call_llm(
-            request.system_prompt, 
-            request.description, 
-            request.api_base_url,
-            request.api_key,
-            request.model_name,
-            use_schema=True
-        )
-        return {"hypotheses": response.get("hypotheses", [])}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/generate-hypotheses-stream")
-async def generate_hypotheses_stream(request: HypothesisRequest):
     """Generate hypotheses using LLM with streaming"""
     try:
         async def generate():
@@ -215,47 +198,6 @@ async def generate_hypotheses_stream(request: HypothesisRequest):
 
 @app.post("/test-hypothesis")
 async def test_hypothesis(request: TestRequest):
-    """Test a hypothesis using Python code execution"""
-    try:
-        # Generate analysis code using LLM
-        analysis_response = await _call_llm(
-            request.analysis_prompt,
-            f"Hypothesis: {request.hypothesis}\n\n{request.description}",
-            request.api_base_url,
-            request.api_key,
-            request.model_name
-        )
-        
-        # Extract Python code from response
-        code = _extract_python_code(analysis_response)
-        
-        # Execute code with data
-        df = pd.DataFrame(request.data)
-        success, p_value = _execute_test_code(code, df)
-        
-        # Generate summary
-        summary = await _generate_summary(
-            request.hypothesis, 
-            request.description, 
-            success, 
-            p_value,
-            request.api_base_url,
-            request.api_key,
-            request.model_name
-        )
-        
-        return TestResponse(
-            success=success,
-            p_value=p_value,
-            analysis=analysis_response,
-            summary=summary
-        )
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/test-hypothesis-stream")
-async def test_hypothesis_stream(request: TestRequest):
     """Test a hypothesis using Python code execution with streaming"""
     try:
         async def generate():
@@ -292,36 +234,6 @@ async def test_hypothesis_stream(request: TestRequest):
 
 @app.post("/synthesize")
 async def synthesize_results(request: SynthesisRequest):
-    """Synthesize hypothesis test results"""
-    try:
-        content = "\n\n".join([
-            f"Hypothesis: {h['title']}\nBenefit: {h['benefit']}\nResult: {h['outcome']}"
-            for h in request.hypotheses if h.get('outcome')
-        ])
-        
-        system_prompt = """Given the below hypotheses and results, summarize the key takeaways and actions in Markdown.
-Begin with the hypotheses with lowest p-values AND highest business impact. Ignore results with errors.
-Use action titles has H5 (#####). Just reading titles should tell the audience EXACTLY what to do.
-Below each, add supporting bullet points that
-  - PROVE the action title, mentioning which hypotheses led to this conclusion.
-  - Do not mention the p-value but _interpret_ it to support the action
-  - Highlight key phrases in **bold**.
-Finally, after a break (---) add a 1-paragraph executive summary section (H5) summarizing these actions."""
-        
-        response = await _call_llm(
-            system_prompt, 
-            content,
-            request.api_base_url,
-            request.api_key,
-            request.model_name
-        )
-        return {"synthesis": response}
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/synthesize-stream")
-async def synthesize_results_stream(request: SynthesisRequest):
     """Synthesize hypothesis test results with streaming"""
     try:
         user_content = "\n\n".join([
