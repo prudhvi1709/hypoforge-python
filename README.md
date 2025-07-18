@@ -2,6 +2,20 @@
 
 An AI-powered tool that automatically generates and tests hypotheses on data, providing actionable insights through statistical analysis with real-time streaming responses.
 
+## Quick Start
+
+```bash
+# Install with uv
+uv run git+https://github.com/prudhvi1709/hypoforge-python.git
+
+# Or clone and run locally
+git clone https://github.com/prudhvi1709/hypoforge-python.git
+cd hypoforge-python
+uv run app.py
+```
+
+Open `http://localhost:8000`, configure API settings (⚙️), and start analyzing data.
+
 ## Overview
 
 Hypothesis Forge analyzes your data and generates hypotheses that you can test. It then automatically tests them and provides detailed results with statistical significance, all powered by a FastAPI backend with streaming LLM responses.
@@ -72,7 +86,7 @@ graph TB
     Q --> |Stream| E
     E --> D
     
-    %% External Data
+  %% External Data
     S --> |Demo Files| I
 ```
 
@@ -126,50 +140,10 @@ graph TB
 - **Progressive rendering**: Content appears as it streams from the backend
 - **Responsive design**: Bootstrap 5 with dark mode support
 
-## Quick Start
-
-### Prerequisites
-- Python 3.8+ with uv installed
-- Any OpenAI-compatible API access (LLM Foundry, OpenAI, etc.)
-
-### Installation & Setup
-
-1. **Clone the repository:**
-```bash
-git clone https://github.com/prudhvi1709/hypoforge-python.git
-cd hypoforge-python
-```
-
-2. **Run with uv (recommended):**
-```bash
-uv run app.py
-```
-
-Or traditional setup:
-```bash
-pip install fastapi uvicorn python-multipart pandas scipy numpy aiohttp
-python app.py
-```
-
-3. **Open in browser:**
-   - Navigate to `http://localhost:8000`
-   - Click the Settings (⚙️) button in the navigation
-   - Configure your API settings:
-     - **API Base URL**: `https://llmfoundry.straive.com/openai/v1` (default)
-     - **API Key**: Your API key
-     - **Model Name**: `gpt-4.1-nano` (default)
-
-4. **Start analyzing:**
-   - Select a demo dataset or upload your own CSV/SQLite file
-   - Watch hypotheses generate in real-time
-   - Test hypotheses and see streaming analysis
-   - Synthesize results for actionable insights
-
 ## Usage
 
-### Basic Workflow
 1. **Configure API Settings**: Click the gear icon and enter your API credentials
-2. **Load Data**: Select a demo dataset or upload your own file
+2. **Load Data**: Select a demo dataset or upload your own file  
 3. **Generate Hypotheses**: Watch as the AI generates relevant hypotheses in real-time
 4. **Test Hypotheses**: Click "Test" on any hypothesis to see streaming analysis
 5. **Review Results**: See statistical analysis, p-values, and plain English summaries
