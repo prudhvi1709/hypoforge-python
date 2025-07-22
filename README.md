@@ -23,123 +23,43 @@ Open `http://localhost:8000`, configure API settings (⚙️), and start analyzi
 Hypothesis Forge analyzes your data and generates hypotheses that you can test. It then automatically tests them and provides detailed results with statistical significance, all powered by a FastAPI backend with streaming LLM responses.
 
 ```mermaid
-graph TB
-    subgraph "User Interface Layer"
-        A[Web Frontend<br/>Bootstrap 5 + JS ES6+]
-        B[Settings Modal<br/>localStorage Config]
-        C[Data Input<br/>File Path/Demo/URL]
-        D[Hypothesis Cards<br/>Interactive Testing]
-        E[Results Display<br/>Streaming Updates]
-        F[Synthesis Panel<br/>Actionable Insights]
+flowchart LR
+    subgraph "👤 User Actions"
+        A[Upload Data<br/>CSV/SQLite/URL]
+        B[Configure API<br/>Settings]
     end
     
-    subgraph "Client-Side Processing"
-        G[LLM Client<br/>Direct API Calls]
-        H[Markdown Parser<br/>Marked.js + Syntax Highlighting]
-        I[Streaming Parser<br/>Real-time JSON Parsing]
-        J[Session State<br/>sessionId + descriptions]
+    subgraph "🤖 AI Processing"
+        C[Generate<br/>Hypotheses]
+        D[Test Each<br/>Hypothesis]
+        E[Summarize<br/>Results]
     end
     
-    subgraph "FastAPI Backend"
-        K[REST API Server<br/>Pydantic Models]
-        L[Data Endpoints<br/>/load-data, /execute-test]
-        M[Session Management<br/>UUID-based Sessions]
-        N[Input Validation<br/>Type Safety]
+    subgraph "💾 Data & Storage"
+        F[Load & Process<br/>Data Files]
+        G[Store Sessions<br/>Temporarily]
     end
     
-    subgraph "Data Processing Pipeline"
-        O[Multi-Format Loader<br/>CSV, SQLite, URLs]
-        P[DataFrame Processing<br/>Pandas + Data Description]
-        Q[Session Storage<br/>Parquet Files in Temp Dir]
-        R[Statistical Execution<br/>Scipy + Numpy]
-    end
-    
-    subgraph "AI Processing Pipeline"
-        S[Hypothesis Generation<br/>Structured JSON Schema]
-        T[Analysis Code Generation<br/>Python Statistical Tests]
-        U[Hypothesis Testing<br/>Server-side Execution]
-        V[Results Interpretation<br/>Plain English Summaries]
-        W[Results Synthesis<br/>Actionable Recommendations]
-    end
-    
-    subgraph "External Services"
-        X[LLM Provider<br/>OpenAI-compatible API]
-        Y[Demo Data Sources<br/>Remote CSV/JSON URLs]
-        Z[File System<br/>Local CSV/SQLite Files]
-    end
-    
-    subgraph "Session & Storage"
-        AA[Temporary Sessions<br/>Auto-cleanup by Age]
-        BB[Parquet Storage<br/>Efficient DataFrame Serialization]
-        CC[Session Lifecycle<br/>Create → Use → Cleanup]
-    end
-
-    %% User Interaction Flow
-    A --> B
-    A --> C
-    A --> D
-    A --> E
+    %% Simple User Flow
     A --> F
+    F --> C
+    C --> D
+    D --> E
+    B -.-> C
+    B -.-> D
     
-    %% Client-Side Processing
-    B --> |Save Settings| G
-    C --> |Load Data| K
-    D --> |Test Hypothesis| G
-    E --> |Parse Responses| H
-    F --> |Synthesize| G
+    %% Storage Flow
+    F --> G
+    G --> D
     
-    %% Real-time Streaming
-    G --> |Stream Requests| X
-    X --> |Stream Responses| I
-    I --> |Update UI| E
-    I --> |Update Cards| D
+    %% Styling for clarity
+    classDef userAction fill
+    classDef aiProcess fill
+    classDef dataStore fill
     
-    %% Backend API Flow
-    K --> L
-    L --> N
-    N --> O
-    
-    %% Data Processing Flow
-    O --> |Load from File| Z
-    O --> |Load from URL| Y
-    O --> P
-    P --> Q
-    Q --> M
-    M --> AA
-    
-    %% Session Management
-    AA --> BB
-    BB --> CC
-    J --> |Track Sessions| AA
-    
-    %% Hypothesis Testing Flow
-    D --> |Send Test Request| L
-    L --> |Load Session Data| Q
-    Q --> R
-    G --> |Generate Code| S
-    S --> T
-    T --> U
-    U --> R
-    R --> V
-    V --> W
-    
-    %% Three-Phase Testing
-    G -.->|Phase 1: Code Gen| T
-    T -.->|Phase 2: Execute| U
-    U -.->|Phase 3: Summary| V
-    
-    %% Configuration & Settings
-    B -.->|Store Locally| J
-    J -.->|Never to Backend| K
-    
-    %% Batch Operations
-    D --> |Run All Tests| D
-    E --> |Collect Results| W
-    
-    %% Error Handling & Validation
-    N -.->|Validate Requests| L
-    R -.->|Safe Execution| U
-    O -.->|Format Support| P
+    class A,B userAction
+    class C,D,E aiProcess
+    class F,G dataStore
 ```
 
 ## Features
