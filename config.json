@@ -45,14 +45,14 @@
     {
       "title": "CraftBeer",
       "href": "https://raw.githubusercontent.com/gramener/datasets/main/craftbeer.db",
-      "audience" : "Given craft beer data, generate insights on consumer preferences, market trends, and brewing techniques. This information can be valuable for brewers, marketers, and enthusiasts.",
+      "audience": "Given craft beer data, generate insights on consumer preferences, market trends, and brewing techniques. This information can be valuable for brewers, marketers, and enthusiasts.",
       "body": "Craft beers labeled by styles and composition. A separate dataset lists breweries by state."
     },
     {
       "title": "Atherosclerosis",
       "href": "https://raw.githubusercontent.com/gramener/datasets/main/atherosclerosis.db",
-      "audience" : "Given data on atherosclerosis, generate insights on cardiovascular health trends, risk factors, and preventive measures. This information can be valuable for healthcare professionals, researchers, and public health officials.",
+      "audience": "Given data on atherosclerosis, generate insights on cardiovascular health trends, risk factors, and preventive measures. This information can be valuable for healthcare professionals, researchers, and public health officials.",
       "body": "Atherosclerosis is a longitudinal 20 years lasting primary preventive study of middle-aged men."
     }
   ]
-}
+} 

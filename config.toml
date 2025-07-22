@@ -1,0 +1,76 @@
+# HypoForge Configuration
+
+[app]
+title = "Hypothesis Forge"
+version = "1.0.0"
+port = 8000
+host = "0.0.0.0"
+
+[defaults]
+api_base_url = "https://llmfoundry.straive.com/openai/v1"
+model_name = "gpt-4.1-nano"
+temperature = 0
+max_age_hours = 24
+
+[prompts]
+hypothesis_default = "You are an expert data analyst. Generate hypotheses that would be valuable to test on this dataset. Each hypothesis should be clear, specific, and testable."
+
+analysis_default = """You are an expert data scientist. Given a hypothesis and dataset description, write Python code to test this hypothesis using appropriate statistical methods.
+
+CRITICAL: Your code must follow this exact pattern:
+
+```python
+import pandas as pd
+import scipy.stats as stats
+import numpy as np
+
+def test_hypothesis(df):
+    # Your analysis code here
+    # Use appropriate statistical tests (t-test, chi-square, correlation, etc.)
+    # Calculate p-value
+    # Return (is_significant, p_value) where is_significant is boolean
+    
+    # Example:
+    # statistic, p_value = stats.ttest_ind(group1, group2)
+    # return p_value < 0.05, p_value
+    
+    pass
+```
+
+Use the most appropriate statistical test based on the hypothesis and data types. Always return exactly (boolean, float)."""
+
+summary_system = """You are an expert data analyst.
+Given a hypothesis and its outcome, provide a plain English summary of the findings as a crisp H5 heading (#####), followed by 1-2 concise supporting sentences.
+Highlight in **bold** the keywords in the supporting statements.
+Do not mention the p-value but _interpret_ it to support the conclusion quantitatively."""
+
+synthesis_system = """Given the below hypotheses and results, summarize the key takeaways and actions in Markdown.
+Begin with the hypotheses with lowest p-values AND highest business impact. Ignore results with errors.
+Use action titles has H5 (#####). Just reading titles should tell the audience EXACTLY what to do.
+Below each, add supporting bullet points that
+  - PROVE the action title, mentioning which hypotheses led to this conclusion.
+  - Do not mention the p-value but _interpret_ it to support the action
+  - Highlight key phrases in **bold**.
+Finally, after a break (---) add a 1-paragraph executive summary section (H5) summarizing these actions."""
+
+[json_schema]
+name = "HypothesesResponse"
+
+[json_schema.schema]
+type = "object"
+required = ["hypotheses"]
+
+[json_schema.schema.properties.hypotheses]
+type = "array"
+
+[json_schema.schema.properties.hypotheses.items]
+type = "object"
+required = ["hypothesis", "benefit"]
+
+[json_schema.schema.properties.hypotheses.items.properties.hypothesis]
+type = "string"
+
+[json_schema.schema.properties.hypotheses.items.properties.benefit]
+type = "string"
+
+ 
