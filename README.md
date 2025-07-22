@@ -18,6 +18,8 @@ Open `http://localhost:8000`, configure API settings (⚙️), and start analyzi
 
 ## Overview
 
+![Looks like this](Screenshot.png)
+
 Hypothesis Forge analyzes your data and generates hypotheses that you can test. It then automatically tests them and provides detailed results with statistical significance, all powered by a FastAPI backend with streaming LLM responses.
 
 ```mermaid
@@ -223,3 +225,145 @@ Included datasets for immediate experimentation:
 For issues and questions:
 - GitHub Issues: [Report bugs or request features](https://github.com/prudhvi1709/hypoforge-python/issues)
 - Documentation: This README and inline code documentation
+
+## Testing
+
+This project includes comprehensive automated tests using pytest. The test suite covers unit tests, integration tests, and end-to-end workflows.
+
+### Running Tests
+
+#### Option 1: Using uv (Recommended - Zero Setup)
+
+All Python files include inline requirements that work with [uv](https://github.com/astral-sh/uv), allowing you to run tests without any setup:
+
+```bash
+# Run all tests (auto-installs dependencies)
+uv run pytest
+# or
+make uv-test
+
+# Note: Always use pytest to run tests, not the test files directly
+
+# Run the main application
+uv run app.py
+# or  
+make uv-run
+
+# Test that uv works
+make uv-verify
+```
+
+#### Option 2: Traditional pip install
+
+1. **Install test dependencies:**
+   ```bash
+   pip install -e ".[test]"
+   # or
+   make install-test
+   ```
+
+2. **Run all tests:**
+   ```bash
+   pytest
+   # or
+   make test
+   ```
+
+3. **Run specific test types:**
+   ```bash
+   # Unit tests only
+   make test-unit
+   
+   # Integration tests only
+   make test-integration
+   
+   # Fast tests (excluding slow ones)
+   make test-fast
+   ```
+
+4. **Run tests with coverage:**
+   ```bash
+   make test-coverage
+   # Opens HTML coverage report
+   make coverage-html
+   ```
+
+5. **Run specific tests:**
+   ```bash
+   # Run a specific test file
+make test-file FILE=tests/test_all.py
+   
+   # Run tests matching a pattern
+   make test-pattern PATTERN=test_load_data
+   ```
+
+### Test Structure
+
+- `tests/test_all.py` - Comprehensive test suite covering all functionality
+- `tests/conftest.py` - Test fixtures and configuration
+
+### Test Categories
+
+- **Unit Tests**: Test individual functions and components
+- **Integration Tests**: Test complete workflows and component interactions
+- **Performance Tests**: Test system behavior under load (marked as `slow`)
+
+### Writing Tests
+
+The test suite uses pytest with the following conventions:
+- Test files start with `test_`
+- Test functions start with `test_`
+- Use descriptive test names explaining what is being tested
+- Group related tests in classes
+- Use appropriate pytest markers (`@pytest.mark.integration`, `@pytest.mark.slow`)
+
+Example test structure:
+```python
+import pytest
+
+class TestAPIEndpoints:
+    def test_load_csv_data(self, client, sample_csv_file):
+        """Test CSV data loading"""
+        response = client.post("/load-data", json={"source": sample_csv_file})
+        assert response.status_code == 200
+        # ... more assertions
+
+class TestUtilityFunctions:
+    def test_data_loading_functions(self, sample_csv_file):
+        """Test data loading utility functions"""
+        # ... test implementation
+
+class TestIntegration:
+    def test_complete_csv_workflow(self, client, sample_csv_file):
+        """Test complete workflow: CSV loading → hypothesis testing"""
+        # ... test implementation
+```
+
+### Continuous Integration
+
+Tests are designed to run in CI environments and include:
+- Automatic cleanup of test artifacts
+- Isolated test sessions
+- Comprehensive error handling
+- Cross-platform compatibility
+
+### uv Inline Requirements
+
+Each Python file in this project includes inline dependencies for uv:
+
+```python
+# /// script
+# dependencies = [
+#     "pytest>=7.4.0",
+#     "fastapi>=0.104.1",
+#     "pandas>=2.1.3",
+# ]
+# ///
+```
+
+This allows any Python file to be run directly with `uv run <filename>.py` without requiring a separate virtual environment or dependency installation step.
+
+For more testing commands, run:
+```bash
+make help
+```

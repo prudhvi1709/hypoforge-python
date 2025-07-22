@@ -1,6 +1,7 @@
 import { Marked } from "https://cdn.jsdelivr.net/npm/marked@13/+esm";
 import hljs from "https://cdn.jsdelivr.net/npm/highlight.js@11/+esm";
 import { parse } from "https://cdn.jsdelivr.net/npm/partial-json@0.1.7/+esm";
+import { LLMClient, CONFIG } from "./llm-client.js";
 
 // DOM elements
 const elements = {
@@ -26,7 +27,7 @@ const config = {
 };
 
 // Global state
-let sessionId, description, hypotheses;
+let sessionId, description, hypotheses, llmClient;
 
 // Setup marked
 const marked = new Marked();
@@ -66,6 +67,9 @@ const validateSettings = () => {
     new bootstrap.Modal(document.getElementById('settingsModal')).show();
     return false;
   }
+  
+  // Initialize LLM client with current settings
+  llmClient = new LLMClient(settings.apiBaseUrl, settings.apiKey, settings.modelName);
   return true;
 };
 
@@ -84,40 +88,7 @@ const apiCall = async (endpoint, options = {}) => {
   return response.json();
 };
 
-const streamFromBackend = async (endpoint, requestBody, onChunk) => {
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody)
-  });
-  
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Streaming API call failed');
-  }
-  
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    
-    const chunk = decoder.decode(value);
-    const lines = chunk.split('\n');
-    
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        try {
-          const data = JSON.parse(line.slice(6));
-          onChunk(data);
-        } catch (e) {
-          // Skip invalid JSON lines
-        }
-      }
-    }
-  }
-};
+
 
 // Data loading functions
 const loadDataSource = async (source) => {
@@ -129,25 +100,24 @@ const loadDataSource = async (source) => {
 };
 
 const generateHypotheses = async (systemPrompt, description) => {
-  const settings = getSettings();
   elements.hypotheses.innerHTML = config.loading;
   
-  await streamFromBackend('/generate-hypotheses', {
-    system_prompt: systemPrompt,
-    description,
-    api_base_url: settings.apiBaseUrl,
-    api_key: settings.apiKey,
-    model_name: settings.modelName
-  }, (data) => {
-    if (data.content) {
+  try {
+    for await (const content of llmClient.streamCompletion(
+      systemPrompt, 
+      description,
+      { useSchema: true, jsonSchema: CONFIG.jsonSchema }
+    )) {
       try {
-        ({ hypotheses } = parse(data.content));
+        ({ hypotheses } = parse(content));
         drawHypotheses();
       } catch (e) {
         // Continue parsing as content streams
       }
     }
-  });
+  } catch (error) {
+    elements.hypotheses.innerHTML = `<div class="alert alert-danger">Error generating hypotheses: ${error.message}</div>`;
+  }
 };
 
 const processDataLoad = async (source, audiencePrompt = null) => {
@@ -216,6 +186,10 @@ document.getElementById("saveSettings").addEventListener("click", () => {
   }
   
   saveSettings(settings);
+  
+  // Reinitialize LLM client with new settings
+  llmClient = new LLMClient(settings.apiBaseUrl, settings.apiKey, settings.modelName);
+  
   bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
   elements.status.innerHTML = "";
   showStatus(`<div class="alert alert-success"><i class="bi bi-check-circle"></i> Settings saved successfully!</div>`);
@@ -252,8 +226,7 @@ elements.hypotheses.addEventListener("click", async (e) => {
   
   const index = button.dataset.index;
   const hypothesis = hypotheses[index];
-  const analysisPrompt = document.getElementById("analysis-prompt").value;
-  const settings = getSettings();
+  const analysisPrompt = document.getElementById("analysis-prompt").value || CONFIG.prompts.analysisDefault;
 
   const resultContainer = button.closest(".card");
   const result = resultContainer.querySelector(".result");
@@ -262,28 +235,39 @@ elements.hypotheses.addEventListener("click", async (e) => {
   outcome.innerHTML = config.loading;
   
   try {
+    // Step 1: Generate analysis code using LLM
     let fullAnalysis = "";
-    
-    await streamFromBackend('/test-hypothesis', {
-      hypothesis: hypothesis.hypothesis,
-      session_id: sessionId,
-      analysis_prompt: analysisPrompt,
-      api_base_url: settings.apiBaseUrl,
-      api_key: settings.apiKey,
-      model_name: settings.modelName
-    }, (data) => {
-      if (data.type === 'analysis') {
-        fullAnalysis = data.content;
-        result.innerHTML = marked.parse(data.content);
-      } else if (data.type === 'summary') {
-        outcome.classList.add(data.p_value < 0.05 ? "success" : "failure");
-        outcome.innerHTML = marked.parse(data.content);
-        result.innerHTML = `<details>
-          <summary class="h5 my-3">Analysis</summary>
-          ${marked.parse(fullAnalysis)}
-        </details>`;
-      }
+    for await (const content of llmClient.streamCompletion(
+      analysisPrompt,
+      `Hypothesis: ${hypothesis.hypothesis}\n\n${description}`
+    )) {
+      fullAnalysis = content;
+      result.innerHTML = marked.parse(content);
+    }
+
+    // Step 2: Execute the code on the backend
+    const codeExecutionResponse = await apiCall('/execute-hypothesis-test', {
+      method: 'POST',
+      body: JSON.stringify({
+        session_id: sessionId,
+        analysis_code: fullAnalysis
+      })
     });
+
+    // Step 3: Generate summary using LLM
+    const summaryUserContent = `Hypothesis: ${hypothesis.hypothesis}\n\n${description}\n\nResult: ${codeExecutionResponse.success}. p-value: ${codeExecutionResponse.p_value.toFixed(6)}`;
+    
+    for await (const summaryContent of llmClient.streamCompletion(
+      CONFIG.prompts.summarySystem,
+      summaryUserContent
+    )) {
+      outcome.classList.add(codeExecutionResponse.p_value < 0.05 ? "success" : "failure");
+      outcome.innerHTML = marked.parse(summaryContent);
+      result.innerHTML = `<details>
+        <summary class="h5 my-3">Analysis</summary>
+        ${marked.parse(fullAnalysis)}
+      </details>`;
+    }
   } catch (error) {
     outcome.innerHTML = `<pre class="alert alert-danger">${error.message}</pre>`;
   }
@@ -310,20 +294,18 @@ document.querySelector("#synthesize").addEventListener("click", async () => {
   elements.synthesisResult.innerHTML = config.loading;
   
   try {
-    const settings = getSettings();
+    const userContent = testedHypotheses
+      .map(h => `Hypothesis: ${h.title}\nBenefit: ${h.benefit}\nResult: ${h.outcome}`)
+      .join('\n\n');
     
-    await streamFromBackend('/synthesize', {
-      hypotheses: testedHypotheses,
-      api_base_url: settings.apiBaseUrl,
-      api_key: settings.apiKey,
-      model_name: settings.modelName
-    }, (data) => {
-      if (data.content) {
-        elements.synthesisResult.innerHTML = marked.parse(data.content);
-      }
-    });
+    for await (const content of llmClient.streamCompletion(
+      CONFIG.prompts.synthesisSystem,
+      userContent
+    )) {
+      elements.synthesisResult.innerHTML = marked.parse(content);
+    }
   } catch (error) {
-    elements.synthesisResult.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+    elements.synthesisResult.innerHTML = `<div class="alert alert-danger">Error synthesizing results: ${error.message}</div>`;
   }
 });
 

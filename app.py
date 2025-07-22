@@ -14,7 +14,7 @@
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Tuple, Optional, Union
 import pandas as pd
@@ -44,23 +44,6 @@ TEMP_DIR.mkdir(exist_ok=True)
 session_data = {}
 
 # Models
-class BaseRequestModel(BaseModel):
-    api_base_url: str
-    api_key: str
-    model_name: str
-
-class HypothesisRequest(BaseRequestModel):
-    system_prompt: str
-    description: str
-
-class TestRequest(BaseRequestModel):
-    hypothesis: str
-    session_id: str
-    analysis_prompt: str
-
-class SynthesisRequest(BaseRequestModel):
-    hypotheses: List[Dict[str, str]]
-
 class LoadRequest(BaseModel):
     source: str  # file_path or demo_url
 
@@ -69,6 +52,14 @@ class DataSessionResponse(BaseModel):
     description: str
     row_count: int
     column_count: int
+
+class ExecuteTestRequest(BaseModel):
+    session_id: str
+    analysis_code: str
+
+class ExecuteTestResponse(BaseModel):
+    success: bool
+    p_value: float
 
 @app.get("/")
 async def root():
@@ -233,85 +224,17 @@ def _get_session_description(session_id: str) -> str:
         raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
     return session_data[session_id]["description"]
 
-@app.post("/generate-hypotheses")
-async def generate_hypotheses(request: HypothesisRequest):
-    """Generate hypotheses using LLM with streaming"""
-    try:
-        async def generate():
-            async for content in _call_llm_stream(
-                request.system_prompt,
-                request.description,
-                request.api_base_url,
-                request.api_key,
-                request.model_name,
-                use_schema=True,
-            ):
-                yield f"data: {json.dumps({'content': content})}\n\n"
-
-        return StreamingResponse(generate(), media_type="text/event-stream")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/test-hypothesis")
-async def test_hypothesis(request: TestRequest):
-    """Test a hypothesis using Python code execution with streaming"""
+@app.post("/execute-hypothesis-test")
+async def execute_hypothesis_test(request: ExecuteTestRequest) -> ExecuteTestResponse:
+    """Execute hypothesis test code and return results"""
     try:
         df = _load_session_data(request.session_id)
-        description = _get_session_description(request.session_id)
-
-        async def generate():
-            # Stream analysis generation
-            full_analysis = ""
-            async for content in _call_llm_stream(
-                request.analysis_prompt,
-                f"Hypothesis: {request.hypothesis}\n\n{description}",
-                request.api_base_url,
-                request.api_key,
-                request.model_name,
-            ):
-                full_analysis = content
-                yield f"data: {json.dumps({'type': 'analysis', 'content': content})}\n\n"
-
-            # Extract and execute code
-            code = _extract_python_code(full_analysis)
-            success, p_value = _execute_test_code(code, df)
-
-            # Stream summary generation
-            async for content in _call_llm_stream(
-                config["prompts"]["summary_system"],
-                f"Hypothesis: {request.hypothesis}\n\n{description}\n\nResult: {success}. p-value: {p_value:.6f}",
-                request.api_base_url,
-                request.api_key,
-                request.model_name,
-            ):
-                yield f"data: {json.dumps({'type': 'summary', 'content': content, 'success': success, 'p_value': p_value})}\n\n"
-
-        return StreamingResponse(generate(), media_type="text/event-stream")
+        code = _extract_python_code(request.analysis_code)
+        success, p_value = _execute_test_code(code, df)
+        
+        return ExecuteTestResponse(success=success, p_value=p_value)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/synthesize")
-async def synthesize_results(request: SynthesisRequest):
-    """Synthesize hypothesis test results with streaming"""
-    try:
-        user_content = "\n\n".join([
-            f"Hypothesis: {h['title']}\nBenefit: {h['benefit']}\nResult: {h['outcome']}"
-            for h in request.hypotheses if h.get("outcome")
-        ])
-
-        async def generate():
-            async for content in _call_llm_stream(
-                config["prompts"]["synthesis_system"],
-                user_content,
-                request.api_base_url,
-                request.api_key,
-                request.model_name,
-            ):
-                yield f"data: {json.dumps({'content': content})}\n\n"
-
-        return StreamingResponse(generate(), media_type="text/event-stream")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Code execution error: {str(e)}")
 
 def _generate_description(df: pd.DataFrame) -> str:
     """Generate data description from DataFrame"""
@@ -340,69 +263,7 @@ def _generate_description(df: pd.DataFrame) -> str:
         + "\n".join(column_descriptions)
     )
 
-async def _call_llm_stream(
-    system_prompt: str,
-    user_content: str,
-    api_base_url: str,
-    api_key: str,
-    model_name: str,
-    use_schema: bool = False,
-):
-    """Call LLM API with streaming support"""
-    if not api_key:
-        raise HTTPException(status_code=400, detail="API key is required")
 
-    body = {
-        "model": model_name,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-        "stream": True,
-        "stream_options": {"include_usage": True},
-        "temperature": config["defaults"]["temperature"],
-    }
-
-    if use_schema:
-        body["response_format"] = {
-            "type": "json_schema",
-            "json_schema": config["json_schema"]
-        }
-
-    async with httpx.AsyncClient() as client:
-        async with client.stream(
-            "POST",
-            f"{api_base_url}/chat/completions",
-            json=body,
-            headers={
-                "Authorization": f"Bearer {api_key}:hypoforge",
-                "Content-Type": "application/json",
-            },
-        ) as response:
-            if response.status_code != 200:
-                error_text = await response.aread()
-                raise HTTPException(
-                    status_code=response.status_code, detail=f"LLM API error: {error_text.decode()}"
-                )
-
-            full_content = ""
-            async for line in response.aiter_lines():
-                if line:
-                    line_str = line.strip()
-                    if line_str.startswith("data: "):
-                        data_str = line_str[6:]
-                        if data_str and data_str != "[DONE]":
-                            try:
-                                chunk = json.loads(data_str)
-                                choices = chunk.get("choices", [])
-                                if choices and len(choices) > 0:
-                                    delta = choices[0].get("delta", {})
-                                    if delta.get("content"):
-                                        content = delta["content"]
-                                        full_content += content
-                                        yield full_content
-                            except json.JSONDecodeError:
-                                continue
 
 def _extract_python_code(text: str) -> str:
     """Extract Python code from markdown code blocks"""
