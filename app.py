@@ -7,6 +7,7 @@
 #     "scipy>=1.11.4",
 #     "numpy>=1.26.0",
 #     "httpx>=0.27.0",
+#     "pyarrow>=15.0.0",
 # ]
 # ///
 
@@ -14,7 +15,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import pandas as pd
 import sqlite3
 import json
@@ -24,12 +25,20 @@ import numpy as np
 import scipy.stats as stats
 import webbrowser
 import threading
+import tempfile
+import uuid
+import shutil
+from pathlib import Path
 
 app = FastAPI(title="Hypothesis Forge", version="1.0.0")
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Session storage for data files
+TEMP_DIR = Path(tempfile.gettempdir()) / "hypoforge_sessions"
+TEMP_DIR.mkdir(exist_ok=True)
+session_data = {}  # In-memory storage for session metadata
 
 # Models
 class HypothesisRequest(BaseModel):
@@ -46,9 +55,8 @@ class HypothesisResponse(BaseModel):
 
 class TestRequest(BaseModel):
     hypothesis: str
-    description: str
+    session_id: str
     analysis_prompt: str
-    data: List[Dict[str, Any]]
     api_base_url: str
     api_key: str
     model_name: str
@@ -76,6 +84,13 @@ class LoadDemoRequest(BaseModel):
     demo_url: str
 
 
+class DataSessionResponse(BaseModel):
+    session_id: str
+    description: str
+    row_count: int
+    column_count: int
+
+
 @app.get("/")
 async def root():
     """Serve the main HTML page"""
@@ -90,8 +105,8 @@ async def get_config():
 
 
 @app.post("/load-file")
-async def load_file(request: LoadFileRequest):
-    """Load file from filesystem path and return data description"""
+async def load_file(request: LoadFileRequest) -> DataSessionResponse:
+    """Load file from filesystem path, save to temporary storage, and return session ID"""
     try:
         file_path = request.file_path.strip()
 
@@ -103,9 +118,33 @@ async def load_file(request: LoadFileRequest):
             raise HTTPException(status_code=400, detail=f"Path is not a file: {file_path}")
 
         df = await _load_file_data(file_path)
-        data, description = _process_dataframe(df)
+        
+        # Generate session ID and save data
+        session_id = str(uuid.uuid4())
+        session_file_path = TEMP_DIR / f"{session_id}.parquet"
+        
+        # Save DataFrame to parquet for efficient storage and loading
+        df.to_parquet(session_file_path, index=False)
+        
+        # Generate description
+        description = _generate_description(df)
+        
+        # Store session metadata
+        session_data[session_id] = {
+            "file_path": str(session_file_path),
+            "description": description,
+            "original_path": file_path,
+            "row_count": len(df),
+            "column_count": len(df.columns),
+            "created_at": pd.Timestamp.now()
+        }
 
-        return {"data": data, "description": description}
+        return DataSessionResponse(
+            session_id=session_id,
+            description=description,
+            row_count=len(df),
+            column_count=len(df.columns)
+        )
 
     except pd.errors.EmptyDataError:
         raise HTTPException(status_code=400, detail="The file is empty or contains no valid data")
@@ -120,14 +159,12 @@ async def load_file(request: LoadFileRequest):
 
 
 @app.post("/load-demo")
-async def load_demo(request: LoadDemoRequest):
-    """Load demo file from URL and return data description"""
+async def load_demo(request: LoadDemoRequest) -> DataSessionResponse:
+    """Load demo file from URL, save to temporary storage, and return session ID"""
     try:
         demo_url = request.demo_url.strip()
 
         # Download file to temporary location
-        import tempfile
-
         async with httpx.AsyncClient() as client:
             response = await client.get(demo_url)
             if response.status_code != 200:
@@ -146,11 +183,36 @@ async def load_demo(request: LoadDemoRequest):
 
         try:
             df = await _load_file_data(temp_path)
-            data, description = _process_dataframe(df)
+            
+            # Generate session ID and save data
+            session_id = str(uuid.uuid4())
+            session_file_path = TEMP_DIR / f"{session_id}.parquet"
+            
+            # Save DataFrame to parquet for efficient storage and loading
+            df.to_parquet(session_file_path, index=False)
+            
+            # Generate description
+            description = _generate_description(df)
+            
+            # Store session metadata
+            session_data[session_id] = {
+                "file_path": str(session_file_path),
+                "description": description,
+                "original_path": demo_url,
+                "row_count": len(df),
+                "column_count": len(df.columns),
+                "created_at": pd.Timestamp.now()
+            }
 
-            return {"data": data, "description": description}
+            return DataSessionResponse(
+                session_id=session_id,
+                description=description,
+                row_count=len(df),
+                column_count=len(df.columns)
+            )
+            
         finally:
-            # Clean up temporary file
+            # Clean up temporary download file
             os.unlink(temp_path)
 
     except Exception as e:
@@ -181,26 +243,78 @@ async def _load_file_data(file_path: str) -> pd.DataFrame:
     return df
 
 
-def _process_dataframe(df: pd.DataFrame) -> tuple:
-    """Process DataFrame for JSON serialization and generate description"""
-    # Convert DataFrame to JSON-serializable format
-    # Handle NaN and infinite values for JSON compatibility
-    df_clean = df.copy()
+@app.delete("/session/{session_id}")
+async def cleanup_session(session_id: str):
+    """Clean up a specific session"""
+    if session_id not in session_data:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    
+    session_info = session_data[session_id]
+    file_path = session_info["file_path"]
+    
+    # Remove file if it exists
+    if os.path.exists(file_path):
+        os.unlink(file_path)
+    
+    # Remove from session data
+    del session_data[session_id]
+    
+    return {"message": f"Session {session_id} cleaned up successfully"}
 
-    # Replace infinite values with None
-    df_clean = df_clean.replace([np.inf, -np.inf], None)
 
-    # Fill NaN values with appropriate defaults based on column type
-    for col in df_clean.columns:
-        if df_clean[col].dtype in ["float64", "float32", "int64", "int32"]:
-            df_clean[col] = df_clean[col].fillna(0)
-        else:
-            df_clean[col] = df_clean[col].fillna("")
+@app.post("/cleanup-old-sessions")
+async def cleanup_old_sessions(max_age_hours: int = 24):
+    """Clean up sessions older than specified hours"""
+    current_time = pd.Timestamp.now()
+    sessions_to_remove = []
+    
+    for session_id, session_info in session_data.items():
+        age_hours = (current_time - session_info["created_at"]).total_seconds() / 3600
+        if age_hours > max_age_hours:
+            sessions_to_remove.append(session_id)
+    
+    cleaned_count = 0
+    for session_id in sessions_to_remove:
+        try:
+            session_info = session_data[session_id]
+            file_path = session_info["file_path"]
+            
+            # Remove file if it exists
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+            
+            # Remove from session data
+            del session_data[session_id]
+            cleaned_count += 1
+        except Exception:
+            continue  # Skip errors and continue cleanup
+    
+    return {"message": f"Cleaned up {cleaned_count} old sessions"}
 
-    data = df_clean.to_dict("records")
-    description = _generate_description(df)
 
-    return data, description
+def _load_session_data(session_id: str) -> pd.DataFrame:
+    """Load data from session storage"""
+    if session_id not in session_data:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    
+    session_info = session_data[session_id]
+    file_path = session_info["file_path"]
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"Session data file not found: {session_id}")
+    
+    try:
+        return pd.read_parquet(file_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading session data: {str(e)}")
+
+
+def _get_session_description(session_id: str) -> str:
+    """Get description for a session"""
+    if session_id not in session_data:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    
+    return session_data[session_id]["description"]
 
 
 @app.post("/generate-hypotheses")
@@ -228,13 +342,16 @@ async def generate_hypotheses(request: HypothesisRequest):
 async def test_hypothesis(request: TestRequest):
     """Test a hypothesis using Python code execution with streaming"""
     try:
+        # Load data from session storage
+        df = _load_session_data(request.session_id)
+        description = _get_session_description(request.session_id)
 
         async def generate():
             # Stream analysis generation
             full_analysis = ""
             async for content in _call_llm_stream(
                 request.analysis_prompt,
-                f"Hypothesis: {request.hypothesis}\n\n{request.description}",
+                f"Hypothesis: {request.hypothesis}\n\n{description}",
                 request.api_base_url,
                 request.api_key,
                 request.model_name,
@@ -244,13 +361,12 @@ async def test_hypothesis(request: TestRequest):
 
             # Extract and execute code
             code = _extract_python_code(full_analysis)
-            df = pd.DataFrame(request.data)
             success, p_value = _execute_test_code(code, df)
 
             # Stream summary generation
             async for content in _call_llm_stream(
                 "You are an expert data analyst.\nGiven a hypothesis and its outcome, provide a plain English summary of the findings as a crisp H5 heading (#####), followed by 1-2 concise supporting sentences.\nHighlight in **bold** the keywords in the supporting statements.\nDo not mention the p-value but _interpret_ it to support the conclusion quantitatively.",
-                f"Hypothesis: {request.hypothesis}\n\n{request.description}\n\nResult: {success}. p-value: {p_value:.6f}",
+                f"Hypothesis: {request.hypothesis}\n\n{description}\n\nResult: {success}. p-value: {p_value:.6f}",
                 request.api_base_url,
                 request.api_key,
                 request.model_name,

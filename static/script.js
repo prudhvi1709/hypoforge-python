@@ -12,7 +12,7 @@ const $filePath = document.getElementById("file-path");
 const $loadFile = document.getElementById("load-file");
 const loading = `<div class="text-center my-5"><div class="spinner-border" role="status"></div></div>`;
 
-let data;
+let sessionId;
 let description;
 let hypotheses;
 
@@ -225,8 +225,11 @@ $loadFile.addEventListener("click", async () => {
   
   try {
     const result = await loadData(filePath);
-    data = result.data;
+    sessionId = result.session_id;
     description = result.description;
+    
+    $status.innerHTML = `<div class="alert alert-success">Loaded ${result.row_count} rows, ${result.column_count} columns</div>`;
+    setTimeout(() => $status.innerHTML = "", 3000);
     
     const systemPrompt = $hypothesisPrompt.value = "You are an expert data analyst. Generate hypotheses that would be valuable to test on this dataset. Each hypothesis should be clear, specific, and testable.";
     const settings = getSettings();
@@ -251,7 +254,6 @@ $loadFile.addEventListener("click", async () => {
       }
     });
     $synthesis.classList.remove("d-none");
-    $status.innerHTML = "";
   } catch (error) {
     $status.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
     setTimeout(() => $status.innerHTML = "", 5000);
@@ -276,8 +278,11 @@ $demos.addEventListener("click", async (e) => {
   
   try {
     const result = await loadData(demo);
-    data = result.data;
+    sessionId = result.session_id;
     description = result.description;
+    
+    $status.innerHTML = `<div class="alert alert-success">Loaded ${result.row_count} rows, ${result.column_count} columns</div>`;
+    setTimeout(() => $status.innerHTML = "", 3000);
     
     const systemPrompt = $hypothesisPrompt.value = demo.audience;
     const settings = getSettings();
@@ -302,7 +307,6 @@ $demos.addEventListener("click", async (e) => {
       }
     });
     $synthesis.classList.remove("d-none");
-    $status.innerHTML = "";
   } catch (error) {
     $status.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
     setTimeout(() => $status.innerHTML = "", 5000);
@@ -351,12 +355,11 @@ $hypotheses.addEventListener("click", async (e) => {
     let fullAnalysis = "";
     let testResult = null;
     
-    // Use streaming for hypothesis testing
+    // Use streaming for hypothesis testing with session ID
     await streamFromBackend('/test-hypothesis', {
       hypothesis: hypothesis.hypothesis,
-      description: description,
+      session_id: sessionId,
       analysis_prompt: analysisPrompt,
-      data: data,
       api_base_url: settings.apiBaseUrl,
       api_key: settings.apiKey,
       model_name: settings.modelName
