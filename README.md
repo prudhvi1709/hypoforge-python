@@ -24,72 +24,122 @@ Hypothesis Forge analyzes your data and generates hypotheses that you can test. 
 
 ```mermaid
 graph TB
-    subgraph "Frontend Layer"
-        A[🖥️ User Interface]
-        B[⚙️ Settings Modal]
-        C[📁 File Upload/Demo Selection]
-        D[📊 Results Display]
-        E[🔄 Real-time Updates]
+    subgraph "User Interface Layer"
+        A[Web Frontend<br/>Bootstrap 5 + JS ES6+]
+        B[Settings Modal<br/>localStorage Config]
+        C[Data Input<br/>File Path/Demo/URL]
+        D[Hypothesis Cards<br/>Interactive Testing]
+        E[Results Display<br/>Streaming Updates]
+        F[Synthesis Panel<br/>Actionable Insights]
     end
     
-    subgraph "API Layer"
-        F[🚀 FastAPI Backend]
-        G[📡 Streaming Endpoints]
-        H[🔒 Request Validation]
+    subgraph "Client-Side Processing"
+        G[LLM Client<br/>Direct API Calls]
+        H[Markdown Parser<br/>Marked.js + Syntax Highlighting]
+        I[Streaming Parser<br/>Real-time JSON Parsing]
+        J[Session State<br/>sessionId + descriptions]
     end
     
-    subgraph "Data Processing"
-        I[📋 Data Loading]
-        J[🧹 Data Cleaning]
-        K[📈 DataFrame Processing]
+    subgraph "FastAPI Backend"
+        K[REST API Server<br/>Pydantic Models]
+        L[Data Endpoints<br/>/load-data, /execute-test]
+        M[Session Management<br/>UUID-based Sessions]
+        N[Input Validation<br/>Type Safety]
     end
     
-    subgraph "AI Pipeline"
-        L[🤖 LLM API Client]
-        M[💭 Hypothesis Generation]
-        N[🔬 Statistical Testing]
-        O[📝 Code Generation]
-        P[📊 Results Analysis]
-        Q[💡 Synthesis & Insights]
+    subgraph "Data Processing Pipeline"
+        O[Multi-Format Loader<br/>CSV, SQLite, URLs]
+        P[DataFrame Processing<br/>Pandas + Data Description]
+        Q[Session Storage<br/>Parquet Files in Temp Dir]
+        R[Statistical Execution<br/>Scipy + Numpy]
+    end
+    
+    subgraph "AI Processing Pipeline"
+        S[Hypothesis Generation<br/>Structured JSON Schema]
+        T[Analysis Code Generation<br/>Python Statistical Tests]
+        U[Hypothesis Testing<br/>Server-side Execution]
+        V[Results Interpretation<br/>Plain English Summaries]
+        W[Results Synthesis<br/>Actionable Recommendations]
     end
     
     subgraph "External Services"
-        R[🧠 LLM Provider]
-        S[☁️ Demo Data URLs]
+        X[LLM Provider<br/>OpenAI-compatible API]
+        Y[Demo Data Sources<br/>Remote CSV/JSON URLs]
+        Z[File System<br/>Local CSV/SQLite Files]
     end
     
-    %% User Flow
+    subgraph "Session & Storage"
+        AA[Temporary Sessions<br/>Auto-cleanup by Age]
+        BB[Parquet Storage<br/>Efficient DataFrame Serialization]
+        CC[Session Lifecycle<br/>Create → Use → Cleanup]
+    end
+
+    %% User Interaction Flow
     A --> B
-    B --> |Configure API| F
     A --> C
-    C --> |Upload/Select| I
+    A --> D
+    A --> E
+    A --> F
     
-    %% Data Flow
-    I --> J
-    J --> K
-    K --> M
+    %% Client-Side Processing
+    B --> |Save Settings| G
+    C --> |Load Data| K
+    D --> |Test Hypothesis| G
+    E --> |Parse Responses| H
+    F --> |Synthesize| G
     
-    %% API Flow
-    F --> G
-    G --> H
-    H --> L
+    %% Real-time Streaming
+    G --> |Stream Requests| X
+    X --> |Stream Responses| I
+    I --> |Update UI| E
+    I --> |Update Cards| D
     
-    %% AI Processing
-    L --> R
-    R --> |Stream Response| M
-    M --> |Generate Code| O
-    O --> N
-    N --> |Execute Tests| P
+    %% Backend API Flow
+    K --> L
+    L --> N
+    N --> O
+    
+    %% Data Processing Flow
+    O --> |Load from File| Z
+    O --> |Load from URL| Y
+    O --> P
     P --> Q
+    Q --> M
+    M --> AA
     
-    %% Results Flow
-    M --> |Stream| E
-    P --> |Stream| E
-    Q --> |Stream| E
-    E --> D
+    %% Session Management
+    AA --> BB
+    BB --> CC
+    J --> |Track Sessions| AA
     
-  %% External Data
-    S --> |Demo Files| I
+    %% Hypothesis Testing Flow
+    D --> |Send Test Request| L
+    L --> |Load Session Data| Q
+    Q --> R
+    G --> |Generate Code| S
+    S --> T
+    T --> U
+    U --> R
+    R --> V
+    V --> W
+    
+    %% Three-Phase Testing
+    G -.->|Phase 1: Code Gen| T
+    T -.->|Phase 2: Execute| U
+    U -.->|Phase 3: Summary| V
+    
+    %% Configuration & Settings
+    B -.->|Store Locally| J
+    J -.->|Never to Backend| K
+    
+    %% Batch Operations
+    D --> |Run All Tests| D
+    E --> |Collect Results| W
+    
+    %% Error Handling & Validation
+    N -.->|Validate Requests| L
+    R -.->|Safe Execution| U
+    O -.->|Format Support| P
 ```
 
 ## Features
