@@ -6,7 +6,7 @@
 #     "pandas>=2.1.3",
 #     "scipy>=1.11.4",
 #     "numpy>=1.26.0",
-#     "aiohttp>=3.9.1",
+#     "httpx>=0.27.0",
 # ]
 # ///
 
@@ -19,9 +19,11 @@ import pandas as pd
 import sqlite3
 import json
 import os
-import aiohttp
+import httpx
 import numpy as np
 import scipy.stats as stats
+import webbrowser
+import threading
 
 app = FastAPI(title="Hypothesis Forge", version="1.0.0")
 
@@ -126,21 +128,21 @@ async def load_demo(request: LoadDemoRequest):
         # Download file to temporary location
         import tempfile
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(demo_url) as response:
-                if response.status != 200:
-                    raise HTTPException(
-                        status_code=response.status,
-                        detail=f"Failed to download demo file: {demo_url}",
-                    )
+        async with httpx.AsyncClient() as client:
+            response = await client.get(demo_url)
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Failed to download demo file: {demo_url}",
+                )
 
-                # Create temporary file with correct extension
-                file_extension = demo_url.split(".")[-1].lower()
-                with tempfile.NamedTemporaryFile(
-                    suffix=f".{file_extension}", delete=False
-                ) as tmp_file:
-                    tmp_file.write(await response.read())
-                    temp_path = tmp_file.name
+            # Create temporary file with correct extension
+            file_extension = demo_url.split(".")[-1].lower()
+            with tempfile.NamedTemporaryFile(
+                suffix=f".{file_extension}", delete=False
+            ) as tmp_file:
+                tmp_file.write(response.content)
+                temp_path = tmp_file.name
 
         try:
             df = await _load_file_data(temp_path)
@@ -376,8 +378,9 @@ async def _call_llm_stream(
 
     api_url = f"{api_base_url}/chat/completions"
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
+    async with httpx.AsyncClient() as client:
+        async with client.stream(
+            "POST",
             api_url,
             json=body,
             headers={
@@ -385,16 +388,16 @@ async def _call_llm_stream(
                 "Content-Type": "application/json",
             },
         ) as response:
-            if response.status != 200:
-                error_text = await response.text()
+            if response.status_code != 200:
+                error_text = await response.aread()
                 raise HTTPException(
-                    status_code=response.status, detail=f"LLM API error: {error_text}"
+                    status_code=response.status_code, detail=f"LLM API error: {error_text.decode()}"
                 )
 
             full_content = ""
-            async for line in response.content:
+            async for line in response.aiter_lines():
                 if line:
-                    line_str = line.decode("utf-8").strip()
+                    line_str = line.strip()
                     if line_str.startswith("data: "):
                         data_str = line_str[6:]
                         if data_str and data_str != "[DONE]":
@@ -457,27 +460,27 @@ async def _call_llm(
 
     api_url = f"{api_base_url}/chat/completions"
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
             api_url,
             json=body,
             headers={
                 "Authorization": f"Bearer {api_key}:hypoforge",
                 "Content-Type": "application/json",
             },
-        ) as response:
-            if response.status != 200:
-                error_text = await response.text()
-                raise HTTPException(
-                    status_code=response.status, detail=f"LLM API error: {error_text}"
-                )
+        )
+        if response.status_code != 200:
+            error_text = response.text
+            raise HTTPException(
+                status_code=response.status_code, detail=f"LLM API error: {error_text}"
+            )
 
-            result = await response.json()
-            content = result["choices"][0]["message"]["content"]
+        result = response.json()
+        content = result["choices"][0]["message"]["content"]
 
-            if use_schema:
-                return json.loads(content)
-            return content
+        if use_schema:
+            return json.loads(content)
+        return content
 
 
 def _extract_python_code(text: str) -> str:
@@ -531,9 +534,20 @@ Do not mention the p-value but _interpret_ it to support the conclusion quantita
     return await _call_llm(system_prompt, user_content, api_base_url, api_key, model_name)
 
 
+def open_browser():
+    """Open browser after a short delay to ensure server is running"""
+    import time
+    time.sleep(1.5)  # Wait for server to start
+    webbrowser.open("http://localhost:8000")
+
+
 def main():
     import uvicorn
-
+    
+    # Start browser opening in background thread
+    browser_thread = threading.Thread(target=open_browser, daemon=True)
+    browser_thread.start()
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
